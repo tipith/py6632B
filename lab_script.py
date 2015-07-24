@@ -11,7 +11,19 @@ import logging
 
 # Some inspiration taken from https://github.com/rambo/python-scpi/ for the display commands.
 
-module_logger = logging.getLogger('HP6632B_module')
+hdlr = logging.FileHandler('log.txt')
+formatter = logging.Formatter('%(asctime)s %(name)10s: %(message)s')
+hdlr.setFormatter(formatter)
+
+logging.basicConfig(format='%(asctime)s %(name)10s: %(message)s', level=logging.DEBUG)
+
+module_logger = logging.getLogger('main')
+charge_logger = logging.getLogger('CHARGE')
+discharge_logger = logging.getLogger('DISCHARGE')
+module_logger.addHandler(hdlr)
+charge_logger.addHandler(hdlr)
+discharge_logger.addHandler(hdlr)
+
 
 EOL = '\n'
 Measurement = collections.namedtuple('Measurement', ['date', 'time', 'volt', 'curr'])
@@ -94,6 +106,8 @@ class HP6632B(threading.Thread):
         self.mutex.acquire()
         if self.ser != None:
             self.ser.write(str + EOL)
+        else:
+            self.logger.warn('Serial connection not open')
         self.mutex.release()
     
     def write_and_read_dev(self, str):
@@ -102,6 +116,8 @@ class HP6632B(threading.Thread):
         if self.ser != None:
             self.ser.write(str + EOL)
             result = self.ser.readline()[:-2]
+        else:
+            self.logger.warn('Serial connection not open')
         self.mutex.release()
         return result
     
@@ -160,25 +176,30 @@ class HP6632B(threading.Thread):
     def reset_device(self):
         self.write_dev('*RST' + EOL)
 
+    def hiZ(self):
+        # even setting the output off consumes -15 mA from battery.
+        # This can go lower if we se the output voltage equal to battery voltage and current to 0
+        self.set_output_state(0)
+        time.sleep(0.2)
+        meas = self.get_volt_and_curr()
+        self.set_volt_and_curr(meas.volt, 0)
+        self.set_output_state(1)
 
 
 # reference http://www.elblinger-elektronik.de/pdf/panasonic_ion.pdf (page 12)
 def charge_li_ion(pwr, EOCV, EODV, C):
-    precharge_C     = 10
-    charge_C        = 1
-    chrg_complete_C = 20
+    precharge_C     = 20
+    charge_C        = 10
+    chrg_complete_C = 30
     
-    module_logger.info('CHARGE: Starting the lithium-ion charge')
+    charge_logger.info('Starting the lithium-ion charge')
     volt_t1 = 0
     volt_t2 = 0
     mah = 0
     old_mah = 0
     dvdt = 0
     
-    # Even setting the output off consumes -15 mA from battery.
-    # As a workaround we set the EOCV voltage, 0 mA current and the output on.
-    pwr.set_output_state(1)
-    pwr.set_volt_and_curr(EOCV, 0)
+    pwr.hiZ()
     
     # wait while we can reliably measure the OCV. dvdt should be less than 1 mV/min
     volt_t1 = pwr.get_volt_and_curr().volt
@@ -187,9 +208,10 @@ def charge_li_ion(pwr, EOCV, EODV, C):
         volt_t2 = pwr.get_volt_and_curr().volt
         dvdt = abs(volt_t1 - volt_t2)
         volt_t1 = volt_t2
-        module_logger.info('CHARGE: OCV = ' + repr(volt_t2) + ', change ' + repr(1000*6*dvdt) + ' mV/min')
+        charge_logger.info('OCV = ' + repr(round(volt_t2,3)) + ', change ' + repr(round(1000*6*dvdt, 4)) + ' mV/min')
         if (6*dvdt) < 0.0001:
             break
+        break
 
     # check if the OCV = EOCV
     if volt_t2 > EOCV - 0.002:
@@ -205,51 +227,54 @@ def charge_li_ion(pwr, EOCV, EODV, C):
         mah += 1000*meas.curr*10/3600
         
         if mah - old_mah > 25:
-            module_logger.info('CHARGE: mAh: ' + repr(mah))
+            charge_logger.info(repr(round(meas.volt,2)) + ' V, ' + repr(round(mah,2)) + ' mAh')
             old_mah = mah
-    
-        if (time.time() - t1) > 720*60:
-            module_logger.info('CHARGE: timeout error (over 720 min)')
+
+        if (time.time() - t1) > 15*60*60:
+            charge_logger.info('timeout error (over 15 hours total)')
             break
-    
         if meas.volt > EOCV + 0.005:
-            module_logger.warn('CHARGE: battery overcharged')
+            charge_logger.warn('battery overcharged')
             break
   
         if meas.volt < EODV:
             if t3 == 0:
                 pwr.set_volt_and_curr(EOCV, C/precharge_C)
-                module_logger.info('CHARGE: battery voltage under EODV, charging at ' + repr(C/precharge_C) + ' mA (C/' + repr(precharge_C) + ')')
+                charge_logger.info('voltage under EODV (' + repr(round(meas.volt,2)) + ' V < ' + repr(EODV) \
+                                   + ' V), charging at ' + repr(C/precharge_C) + ' mA (C/' + repr(precharge_C) + ')')
                 t3 = time.time()
-            if (time.time() - t2) > 120*60:
-                module_logger.info('CHARGE: timeout error (over 120 min EODV)')
+            elif (time.time() - t3) > 120*60:
+                charge_logger.info('timeout error (over 2 hours below EODV)')
                 break
         else:
             if t2 == 0:
                 pwr.set_volt_and_curr(EOCV, C/charge_C)
-                module_logger.info('CHARGE: battery voltage over EODV, charging at ' + repr(C/charge_C) + ' mA (C/' + repr(charge_C) + ')')
+                charge_logger.info('voltage over EODV (' + repr(round(meas.volt,2)) + ' V > ' + repr(EODV) + \
+                                   ' V), charging at ' + repr(C/charge_C) + ' mA (C/' + repr(charge_C) + ')')
                 t2 = time.time()
+            elif ((1000*meas.curr) < (C/chrg_complete_C)):
+                charge_logger.info('charging current (' + repr(int(1000*meas.curr)) + ' mA) less than (C/' + repr(chrg_complete_C) + '), ending charge')
+                break
 
-            # keep the charging at least 60 min even if the charge current is below end condition
-            if ((time.time() - t2) > (60*60)) and (meas.curr < (C/chrg_complete_C)):
-                module_logger.info('CHARGE: charging current less than ' + repr(meas.curr) + ' (C/' + repr(chrg_complete_C) + '), ending charge')
+            if (time.time() - t2) > 12*60*60:
+                charge_logger.info('timeout error (over 12 hours charging)')
                 break
         
         time.sleep(10)
 
-    module_logger.info('CHARGE: Battery charge ended in ' + repr((time.time() - t1)/60) + ' minutes')
-    pwr.set_output_state(0)
-    
+    charge_logger.info('Battery charge ended in ' + repr((time.time() - t1)/60) + ' minutes')
+
+    pwr.hiZ()
     
     
 def discharge_li_ion(pwr, EODV, C, rate):
-    module_logger.info('DISCHARGE: Starting the lithium-ion discharge ')
+    discharge_logger.info('Starting the lithium-ion discharge ')
     
     t1 = time.time()
     mah = 0
     old_mah = 0
     
-    module_logger.info('DISCHARGE: setting discharge current to ' + repr(C/rate) + ' mA (C/' + repr(rate) +')')
+    discharge_logger.info('setting discharge current to ' + repr(C/rate) + ' mA (C/' + repr(rate) +')')
     pwr.set_volt_and_curr(1, C/rate)
     pwr.set_output_state(1)
     
@@ -257,31 +282,22 @@ def discharge_li_ion(pwr, EODV, C, rate):
         meas = pwr.get_volt_and_curr()
         mah -= 1000*meas.curr*10/3600
         if math.fabs(mah - old_mah) > 100:
-            module_logger.info('DISCHARGE: ' + repr(meas.volt) + ' V, ' + repr(meas.curr) + ' A, ' + repr(mah) + ' mAh')
+            discharge_logger.info(repr(meas.volt) + ' V, ' + repr(meas.curr) + ' A, ' + repr(mah) + ' mAh')
             old_mah = mah
         if meas.volt < EODV:
-            module_logger.info('DISCHARGE: end of discharge in ' + repr((time.time() - t1)/60) + ' minutes')
+            discharge_logger.info('end of discharge in ' + repr((time.time() - t1)/60) + ' minutes')
             break
         time.sleep(10)
     
-    pwr.set_output_state(0)
+    pwr.hiZ()
 
 
-
-def set_hiz_output(pwr, EOCV):
-    # even setting the output off consumes -15 mA from battery.
-    # This can go lower if we se the voltage to battery EOCV and current to 0
-    pwr.set_output_state(1)
-    pwr.set_volt_and_curr(EOCV, 0)
-    
 if __name__ == '__main__':
     # Generate the lab power supply object. This will start logging at the speed specified
-    pwr = HP6632B('/dev/ttyUSB0', 1)
+    pwr = HP6632B('/dev/ttyUSB0', 1, True)
     pwr.daemon = True
     pwr.start()
-    
-    time.sleep(2)
-
+    time.sleep(1)    
     # Set the requested battery parameters here 
     #  - EOCV = end of charge voltage
     #  - EODV = end of discharge voltage
@@ -300,29 +316,21 @@ if __name__ == '__main__':
     #capacity = 2500
     
     # samsung s3 mini battery test
-    EOCV = 4.18
-    EODV = 3.1
-    capacity = 1600
+    #EOCV = 4.18
+    #EODV = 3.1
+    #capacity = 1600
+
+    # solar blaster battery
+    EOCV = 8.38
+    EODV = 6.2
+    capacity = 8000
 
     try:
         for discharge_rate in [2]:
-            # let things settle before a cycle is started
-            set_hiz_output(pwr,EOCV)
-            time.sleep(5*60)
-		 
-            # start the charging
             charge_li_ion(pwr, EOCV, EODV, capacity)
-            
-            # let thing settle again, it takes quite a long time for the OCV to settle
-            set_hiz_output(pwr,EOCV)
-            time.sleep(30*60)
-
-            # discharge at the requested rate until EODV is reached
-            discharge_li_ion(pwr, EODV, capacity, discharge_rate)
-
-            # let things settle for an hour before new cycle is started
-            set_hiz_output(pwr,EODV)
-            time.sleep(60*60)
+            time.sleep(600*60)
+            #discharge_li_ion(pwr, EODV, capacity, discharge_rate)
+            #time.sleep(60*60)
 
         pwr.set_output_state(0)
     except KeyboardInterrupt:
