@@ -35,7 +35,7 @@ def setup_logging():
 if __name__ == '__main__':
     setup_logging()
 
-    pwr = py6632B.HP6632B('/dev/ttyUSB0', 1, True)
+    pwr = py6632B.HP6632B('/dev/ttyUSB0', 5, True)
     pwr.daemon = True
     pwr.start()
 

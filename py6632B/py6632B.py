@@ -196,7 +196,7 @@ def charge_li_ion(pwr, battery, amount=None):
     pwr.hiZ()
     
     # wait while we can reliably measure the OCV. dvdt should be less than 1 mV/min
-    charge_logger.info('wait until open-circuit voltage is stable')
+    charge_logger.info('wait until open-circuit voltage is stable (0.1 mV/min)')
     volt_t1 = pwr.get_volt_and_curr().volt
     while True:
         time.sleep(loop_interval)
@@ -204,7 +204,7 @@ def charge_li_ion(pwr, battery, amount=None):
         dvdt = abs(volt_t1 - volt_t2)
         volt_t1 = volt_t2
         mv_per_min = 1000*dvdt * (60/loop_interval)
-        charge_logger.info('OCV = %.2f V, change %0.4f mV/min' % (volt_t2, mv_per_min))
+        charge_logger.info('%.2f V, %0.2f mV/min' % (volt_t2, mv_per_min))
         if mv_per_min < 0.1:
             charge_logger.info('open-circuit voltage is stable')
             break
