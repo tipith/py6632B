@@ -232,16 +232,16 @@ def charge_li_ion(pwr, battery):
   
         if meas.volt < battery['EODV']:
             if t3 == 0:
-                pwr.set_volt_and_curr(battery['EOCV'], precharge_rate)
                 charge_logger.info('precharging at %u mA (C/%u). voltage under EODV (%.2f < %.2f)' % (precharge_rate, precharge_C, meas.volt, battery['EODV']))
+                pwr.set_volt_and_curr(battery['EOCV'], precharge_rate)
                 t3 = time.time()
             elif (time.time() - t3) > 120*60:
                 charge_logger.info('timeout error (over 2 hours below EODV)')
                 break
         else:
             if t2 == 0:
-                pwr.set_volt_and_curr(battery['EOCV'], charge_rate)
                 charge_logger.info('charging at %u mA (C/%u)' % (charge_rate, charge_C))
+                pwr.set_volt_and_curr(battery['EOCV'], charge_rate)
                 t2 = time.time()
             elif (1000*meas.curr) < end_rate:
                 charge_logger.info('end charge. charging current (%u mA) less than (C/%u)' % (1000*meas.curr, chrg_complete_C))
