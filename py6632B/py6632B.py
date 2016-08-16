@@ -10,7 +10,7 @@ import math
 import logging
 
 
-module_logger = logging.getLogger(__name__)
+module_logger = logging.getLogger('py6632B')
 charge_logger = logging.getLogger('charge')
 discharge_logger = logging.getLogger('discharge')
 
@@ -22,8 +22,6 @@ Measurement = collections.namedtuple('Measurement', ['date', 'time', 'volt', 'cu
 class HP6632B(threading.Thread):
     def __init__(self, comport, log_interval, log_enable):
         threading.Thread.__init__(self)
-        
-        module_logger = logging.getLogger('HP6632B')
         
         self.mutex = threading.Lock()
         self.is_running = threading.Event()
