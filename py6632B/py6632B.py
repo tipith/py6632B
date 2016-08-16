@@ -118,7 +118,7 @@ class HP6632B(threading.Thread):
 
     # volt in volts and current in milliamperes
     def set_volt_and_curr(self, volt, curr):
-        module_logger.info('Setting voltage %.2f and current %u' % (volt, curr))
+        module_logger.info('set %.2f V, %u mA' % (volt, curr))
         self.write_dev('SOUR:VOLT %.3f; CURR %u MA' % (volt, curr))
         
     # enable or disable output
@@ -176,13 +176,15 @@ class HP6632B(threading.Thread):
 
 # reference http://www.elblinger-elektronik.de/pdf/panasonic_ion.pdf (page 12)
 def charge_li_ion(pwr, battery):
-    precharge_C     = 20
-    charge_C        = 10
-    chrg_complete_C = 30
+    PRECHARGE_C     = 20
+    CHARGE_C        = 10
+    CHRG_COMPLETE_C = 30
     
-    precharge_rate = battery['capacity'] / precharge_C
-    charge_rate = battery['capacity'] / charge_C
-    end_rate = battery['capacity'] / chrg_complete_C
+    precharge_rate = battery['capacity'] / PRECHARGE_C
+    charge_rate = battery['capacity'] / CHARGE_C
+    end_rate = battery['capacity'] / CHRG_COMPLETE_C
+    
+    loop_interval = 5
     
     charge_logger.info('starting')
     volt_t1 = 0
@@ -216,8 +218,9 @@ def charge_li_ion(pwr, battery):
     t3 = 0
     
     while True:
+        loop_t = time.time()
         meas = pwr.get_volt_and_curr()
-        mah += 1000*meas.curr*10/3600
+        mah += 1000*meas.curr * loop_interval/3600
         
         if mah - old_mah > 25:
             charge_logger.info('%.2f V, %u mAh' % (meas.volt, mah))
@@ -232,7 +235,7 @@ def charge_li_ion(pwr, battery):
   
         if meas.volt < battery['EODV']:
             if t3 == 0:
-                charge_logger.info('precharging at %u mA (C/%u). voltage under EODV (%.2f < %.2f)' % (precharge_rate, precharge_C, meas.volt, battery['EODV']))
+                charge_logger.info('precharging at %u mA (C/%u). voltage under EODV (%.2f < %.2f)' % (precharge_rate, PRECHARGE_C, meas.volt, battery['EODV']))
                 pwr.set_volt_and_curr(battery['EOCV'], precharge_rate)
                 t3 = time.time()
             elif (time.time() - t3) > 120*60:
@@ -240,18 +243,21 @@ def charge_li_ion(pwr, battery):
                 break
         else:
             if t2 == 0:
-                charge_logger.info('charging at %u mA (C/%u)' % (charge_rate, charge_C))
+                charge_logger.info('charging at %u mA (C/%u)' % (charge_rate, CHARGE_C))
                 pwr.set_volt_and_curr(battery['EOCV'], charge_rate)
                 t2 = time.time()
             elif (1000*meas.curr) < end_rate:
-                charge_logger.info('end charge. charging current (%u mA) less than (C/%u)' % (1000*meas.curr, chrg_complete_C))
+                charge_logger.info('end charge. charging current (%u mA) less than (C/%u)' % (1000*meas.curr, CHRG_COMPLETE_C))
                 break
 
             if (time.time() - t2) > 12*60*60:
                 charge_logger.info('timeout error (over 12 hours charging)')
                 break
         
-        time.sleep(10)
+        charge_logger.info('processing time is %f' % time.time() - loop_t)
+        
+        # reduce sleep time by the amount processing took to increace mAh calculation accuracy (serial interface is sloow)
+        time.sleep(loop_interval - (time.time() - loop_t))
 
     charge_logger.info('ended in %u minutes' % ((time.time() - t1)/60))
 
