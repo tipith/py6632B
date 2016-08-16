@@ -42,13 +42,14 @@ if __name__ == '__main__':
     selected_battery = batteries['Solar Blaster']
     
     try:
-        for discharge_rate in [2]:
-            py6632B.charge_li_ion(pwr, selected_battery)
-            time.sleep(600*60)
-            #py6632B.discharge_li_ion(pwr, selected_battery, discharge_rate)
+        for discharge_rate in [4,3,2]:
+            py6632B.charge_li_ion(pwr, selected_battery, amount=20)
+            #time.sleep(600*60)
+            py6632B.discharge_li_ion(pwr, selected_battery, discharge_rate, amount=20)
             #time.sleep(60*60)
-
-        pwr.set_output_state(0)
     except KeyboardInterrupt:
         # CTRL-C ends the script
+        pass
+    finally:
+        pwr.set_output_state(0)
         pwr.stop()

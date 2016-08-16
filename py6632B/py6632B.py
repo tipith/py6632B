@@ -175,7 +175,7 @@ class HP6632B(threading.Thread):
 
 
 # reference http://www.elblinger-elektronik.de/pdf/panasonic_ion.pdf (page 12)
-def charge_li_ion(pwr, battery):
+def charge_li_ion(pwr, battery, amount=None):
     PRECHARGE_C     = 20
     CHARGE_C        = 10
     CHRG_COMPLETE_C = 30
@@ -199,14 +199,15 @@ def charge_li_ion(pwr, battery):
     charge_logger.info('wait until open-circuit voltage is stable')
     volt_t1 = pwr.get_volt_and_curr().volt
     while True:
-        time.sleep(10)
+        time.sleep(loop_interval)
         volt_t2 = pwr.get_volt_and_curr().volt
         dvdt = abs(volt_t1 - volt_t2)
         volt_t1 = volt_t2
-        charge_logger.info('OCV = %.2f V, change %0.4f mV/min' % (volt_t2, 1000*6*dvdt))
-        if (6*dvdt) < 0.0001:
+        mv_per_min = 1000*dvdt * (60/loop_interval)
+        charge_logger.info('OCV = %.2f V, change %0.4f mV/min' % (volt_t2, mv_per_min))
+        if mv_per_min < 0.1:
+            charge_logger.info('open-circuit voltage is stable')
             break
-        break
 
     # check if the OCV = EOCV
     if volt_t2 > battery['EOCV'] - 0.002:
@@ -218,7 +219,7 @@ def charge_li_ion(pwr, battery):
     t3 = 0
     
     while True:
-        loop_t = time.time()
+        loop_start = time.time()
         meas = pwr.get_volt_and_curr()
         mah += 1000*meas.curr * loop_interval/3600
         
@@ -227,10 +228,13 @@ def charge_li_ion(pwr, battery):
             old_mah = mah
 
         if (time.time() - t1) > 15*60*60:
-            charge_logger.info('timeout error (over 15 hours total)')
+            charge_logger.info('end, over 15 hours total')
             break
         if meas.volt > battery['EOCV'] + 0.005:
-            charge_logger.warn('overcharged')
+            charge_logger.warn('end, overcharged')
+            break
+        if amount is not None and math.fabs(mah) > amount:
+            discharge_logger.info('end, charged requested amount')
             break
   
         if meas.volt < battery['EODV']:
@@ -239,7 +243,7 @@ def charge_li_ion(pwr, battery):
                 pwr.set_volt_and_curr(battery['EOCV'], precharge_rate)
                 t3 = time.time()
             elif (time.time() - t3) > 120*60:
-                charge_logger.info('timeout error (over 2 hours below EODV)')
+                charge_logger.info('end, over 2 hours below EODV')
                 break
         else:
             if t2 == 0:
@@ -247,45 +251,51 @@ def charge_li_ion(pwr, battery):
                 pwr.set_volt_and_curr(battery['EOCV'], charge_rate)
                 t2 = time.time()
             elif (1000*meas.curr) < end_rate:
-                charge_logger.info('end charge. charging current (%u mA) less than (C/%u)' % (1000*meas.curr, CHRG_COMPLETE_C))
+                charge_logger.info('end, charging current (%u mA) less than (C/%u)' % (1000*meas.curr, CHRG_COMPLETE_C))
                 break
 
             if (time.time() - t2) > 12*60*60:
-                charge_logger.info('timeout error (over 12 hours charging)')
+                charge_logger.info('end, over 12 hours charging')
                 break
         
-        charge_logger.info('processing time is %f' % (time.time() - loop_t))
-        
         # reduce sleep time by the amount processing took to increace mAh calculation accuracy (serial interface is sloow)
-        time.sleep(loop_interval - (time.time() - loop_t))
+        time.sleep(loop_interval - (time.time() - loop_start))
 
-    charge_logger.info('ended in %u minutes' % ((time.time() - t1)/60))
-
+    discharge_logger.info('ended in %u minutes. %.2f V, %.2f A, %i mAh' % ((time.time() - t1)/60, meas.volt, meas.curr, mah))
     pwr.hiZ()
     
     
-def discharge_li_ion(pwr, battery, rate):
+def discharge_li_ion(pwr, battery, rate, amount=None):
     discharge_logger.info('starting')
     
     discharge_ma = battery['capacity'] / rate
-       
+    loop_interval = 5
+    
     t1 = time.time()
     mah = 0
     old_mah = 0
     
-    discharge_logger.info('setting discharge current to %u mA (C/%u)' % (discharge_ma, rate))
+    discharge_logger.info('discharging %u mA (C/%u)' % (discharge_ma, rate))
     pwr.set_volt_and_curr(1, discharge_ma)
     pwr.set_output_state(1)
     
     while True:
+        loop_start = time.time()
         meas = pwr.get_volt_and_curr()
         mah -= 1000*meas.curr*10/3600
+        
         if math.fabs(mah - old_mah) > 100:
-            discharge_logger.info('%.2f V, %.2f A, %u mAh' % (meas.volt, meas.curr, mah))
+            discharge_logger.info('%.2f V, %.2f A, %i mAh' % (meas.volt, meas.curr, mah))
             old_mah = mah
         if meas.volt < battery['EODV']:
-            discharge_logger.info('ended in %u minutes' % ((time.time() - t1)/60))
+            discharge_logger.info('end, voltage below EODV')
             break
-        time.sleep(10)
+        if amount is not None and math.fabs(mah) > amount:
+            discharge_logger.info('end, discharged requested amount')
+            break
+        
+        # reduce sleep time by the amount processing took to increace mAh calculation accuracy (serial interface is sloow)
+        time.sleep(loop_interval - (time.time() - loop_start))
     
+    discharge_logger.info('ended in %u minutes. %.2f V, %.2f A, %i mAh' % ((time.time() - t1)/60, meas.volt, meas.curr, mah))
     pwr.hiZ()
