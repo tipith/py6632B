@@ -254,7 +254,7 @@ def charge_li_ion(pwr, battery):
                 charge_logger.info('timeout error (over 12 hours charging)')
                 break
         
-        charge_logger.info('processing time is %f' % time.time() - loop_t)
+        charge_logger.info('processing time is %f' % (time.time() - loop_t))
         
         # reduce sleep time by the amount processing took to increace mAh calculation accuracy (serial interface is sloow)
         time.sleep(loop_interval - (time.time() - loop_t))
