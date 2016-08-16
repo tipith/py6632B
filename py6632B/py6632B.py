@@ -181,6 +181,10 @@ def charge_li_ion(pwr, battery):
     charge_C        = 10
     chrg_complete_C = 30
     
+    precharge_rate = battery['capacity'] / precharge_C
+    charge_rate = battery['capacity'] / charge_C
+    end_rate = battery['capacity'] / chrg_complete_C
+    
     charge_logger.info('starting')
     volt_t1 = 0
     volt_t2 = 0
@@ -228,18 +232,18 @@ def charge_li_ion(pwr, battery):
   
         if meas.volt < battery['EODV']:
             if t3 == 0:
-                pwr.set_volt_and_curr(battery['EOCV'], C/precharge_C)
-                charge_logger.info('precharging at %u mA (C/%u). voltage under EODV (%.2f < %.2f)' % (C/precharge_C, precharge_C), meas.volt, battery['EODV'])
+                pwr.set_volt_and_curr(battery['EOCV'], precharge_rate)
+                charge_logger.info('precharging at %u mA (C/%u). voltage under EODV (%.2f < %.2f)' % (precharge_rate, precharge_C), meas.volt, battery['EODV'])
                 t3 = time.time()
             elif (time.time() - t3) > 120*60:
                 charge_logger.info('timeout error (over 2 hours below EODV)')
                 break
         else:
             if t2 == 0:
-                pwr.set_volt_and_curr(battery['EOCV'], C/charge_C)
-                charge_logger.info('charging at %u mA (C/%u)' % (C/charge_C, charge_C))
+                pwr.set_volt_and_curr(battery['EOCV'], charge_rate)
+                charge_logger.info('charging at %u mA (C/%u)' % (charge_rate, charge_C))
                 t2 = time.time()
-            elif ((1000*meas.curr) < (C/chrg_complete_C)):
+            elif (1000*meas.curr) < end_rate:
                 charge_logger.info('end charge. charging current (%u mA) less than (C/%u)' % (1000*meas.curr, chrg_complete_C))
                 break
 
@@ -256,13 +260,15 @@ def charge_li_ion(pwr, battery):
     
 def discharge_li_ion(pwr, battery, rate):
     discharge_logger.info('starting')
+    
+    discharge_ma = battery['capacity'] / rate
        
     t1 = time.time()
     mah = 0
     old_mah = 0
     
-    discharge_logger.info('setting discharge current to %u mA (C/%u)' % (C/rate, rate))
-    pwr.set_volt_and_curr(1, C/rate)
+    discharge_logger.info('setting discharge current to %u mA (C/%u)' % (discharge_ma, rate))
+    pwr.set_volt_and_curr(1, discharge_ma)
     pwr.set_output_state(1)
     
     while True:
