@@ -5,7 +5,10 @@ import logging
 import py6632B
 
 if __name__ == '__main__':
-    logging.basicConfig(format='%(asctime)s %(name)10s: %(message)s', level=logging.DEBUG)
+    logging.basicConfig(filename='log.txt',
+                        format='%(asctime)s %(name)10s: %(message)s',
+                        datefmt="%Y-%m-%d %H:%M:%S",
+                        level=logging.DEBUG)
     
     pwr = py6632B.HP6632B('/dev/ttyUSB0', 1, True)
     pwr.daemon = True
