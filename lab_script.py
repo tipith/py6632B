@@ -19,7 +19,7 @@ if __name__ == '__main__':
         'Generic Panasonic 18650': {'EOCV': 4.18, 'EODV': 3.0, 'capacity': 5000},
         'A123 Systems LiFePo4 25560': {'EOCV': 2*3.58, 'EODV': 2*2.0, 'capacity': 2500},
         'Samsung Mini S3': {'EOCV': 4.18, 'EODV': 3.1, 'capacity': 1600},
-        'Solar Blaster': {'EOCV': 2*3.18, 'EODV': 2*3.1, 'capacity': 8000}
+        'Solar Blaster': {'EOCV': 2*4.18, 'EODV': 2*3.1, 'capacity': 8000}
     }
 
     selected_battery = batteries['Solar Blaster']

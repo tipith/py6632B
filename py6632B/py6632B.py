@@ -82,7 +82,6 @@ class HP6632B(threading.Thread):
         module_logger.info('Stopped logging thread')
           
     def stop(self):
-        module_logger.info('Stopping logging thread')
         self.set_output_state(0)
         self.is_running.clear()
         if self.isAlive():
@@ -195,6 +194,7 @@ def charge_li_ion(pwr, battery):
     pwr.hiZ()
     
     # wait while we can reliably measure the OCV. dvdt should be less than 1 mV/min
+    charge_logger.info('wait until open-circuit voltage is stable')
     volt_t1 = pwr.get_volt_and_curr().volt
     while True:
         time.sleep(10)
